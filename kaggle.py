@@ -58,37 +58,55 @@ def preprocess(df_path):
     df.loc[missing_mask, 'workingday'] = [w for h, w in filled_values]
     
     # Season
+    # 3. season 결측값 처리
     def get_season(row):
-        # Filled season information based on the data
+        """
+        날짜(월, 일)를 기반으로 계절을 결정하는 함수
+        """
         month = row['dteday'].month
         day = row['dteday'].day
         
+        # 기존 데이터에서 해당 월/일의 계절 매핑 확인
         same_date_season = df[
             (df['mnth'] == month) & 
             (df['dteday'].dt.day == day) & 
             (df['season'].notna())
         ]['season']
         
+        # 같은 월/일의 season 데이터가 있으면 사용
         if not same_date_season.empty:
             return same_date_season.mode().iloc[0]
         
-        # Or based on the astronomical information
+        # 없으면 해당 월의 일자별 계절 분포 확인
+        month_seasons = df[
+            (df['mnth'] == month) & 
+            (df['season'].notna())
+        ].groupby(df['dteday'].dt.day)['season'].agg(lambda x: x.mode()[0] if not x.mode().empty else None)
+        
+        # 가장 가까운 일자의 계절 정보 찾기
+        if not month_seasons.empty:
+            # 현재 일자와의 차이가 가장 작은 기존 데이터의 일자 찾기
+            closest_day = min(month_seasons.index, key=lambda x: abs(x - day))
+            if month_seasons[closest_day] is not None:
+                return month_seasons[closest_day]
+            
+        # 위의 방법으로도 찾지 못한 경우, 계절의 일반적인 구분 적용
         if month == 12:
-            return 1 if day >= 21 else 4  
+            return 1 if day >= 21 else 4  # 동지(12/21) 이후 겨울
         elif month == 3:
-            return 2 if day >= 21 else 1 
+            return 2 if day >= 21 else 1  # 춘분(3/21) 이후 봄
         elif month == 6:
-            return 3 if day >= 21 else 2  
+            return 3 if day >= 21 else 2  # 하지(6/21) 이후 여름
         elif month == 9:
-            return 4 if day >= 21 else 3 
+            return 4 if day >= 21 else 3  # 추분(9/21) 이후 가을
         elif month in [1, 2]:
-            return 1  
+            return 1  # 겨울
         elif month in [4, 5]:
-            return 2  
+            return 2  # 봄
         elif month in [7, 8]:
-            return 3  
+            return 3  # 여름
         elif month in [10, 11]:
-            return 4  
+            return 4  # 가을
     
     df.loc[df['season'].isna(), 'season'] = df[df['season'].isna()].apply(get_season, axis=1)
     
@@ -162,12 +180,6 @@ def preprocess(df_path):
         predictions = model.predict(predict_data[weather_all_features])
         df.loc[missing_mask, 'weathersit'] = predictions.astype(int)
         print(f"처리 후 결측치 수: {df['weathersit'].isna().sum()}")
-    
-    # Convert all categorical values into integer type
-    categorical_columns = ['season', 'yr', 'mnth', 'holiday', 'weekday', 'workingday', 'weathersit']
-    for col in categorical_columns:
-        if col in df.columns:
-            df[col] = df[col].round().astype('int32')
     
     # Check dytpe of each column after filling nan values
     print("\n각 컬럼의 현재 데이터 타입:")
@@ -259,20 +271,20 @@ class My_Model(nn.Module):
             # Second layer
             nn.Linear(256, 128),
             nn.BatchNorm1d(128),
-            nn.GELU(),
+            nn.LeakyReLU(),
             nn.Dropout(0.3),
             
             # Third layer
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
-            nn.GELU(),
+            nn.LeakyReLU(),
             nn.Dropout(0.3),
             
             # Fourth layer
             nn.Linear(64, 32),
             nn.BatchNorm1d(32),
-            nn.GELU(),
-            nn.Dropout(0.3),
+            nn.LeakyReLU(),
+            nn.Dropout(0.0),
             
             # Output layer with positive output
             nn.Linear(32, 1),
@@ -423,26 +435,26 @@ def get_dataloader(train_set, valid_set, test_set, batch_size):
 CONFIG = {
     'seed': 711641,
     'valid_ratio': 0.2,
-    'n_epochs': 4000,
+    'n_epochs': 3500,
     'batch_size': 32,
-    'learning_rate': 1e-3,
-    'early_stop': 1000,
+    'learning_rate': 5e-3,
+    'early_stop': 300,
     'save_path': './best_model.pth',
     'scheduler': 'cosine',
-    'T_max': 400,
-    'eta_min': 1e-5,
-    'weight_decay': 1e-3 
+    'T_max': 500,
+    'eta_min': 5e-4,
+    'weight_decay': 1e-3
 }
 
 CONFIG_FOR_NOSPLIT = {
     'seed': 711641,
-    'n_epochs': 2150,
+    'n_epochs': 1200,
     'batch_size': 32,
-    'learning_rate': 1e-3,  # Reduced learning rate
+    'learning_rate': 5e-3,  # Reduced learning rate
     'save_path': './no_split_best_model.pth',
     'scheduler': 'cosine',
-    'T_max': 400,
-    'eta_min': 1e-5,
+    'T_max': 500,
+    'eta_min': 5e-4,
     'weight_decay': 1e-3
 }
 
